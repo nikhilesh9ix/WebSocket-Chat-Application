@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern Chat App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="app-logo">💬 ChatFlow</div>
+            <div class="app-subtitle">Modern real-time messaging</div>
+        </div>
+        
+        <div class="user-section">
+            <h3>👤 User Profile</h3>
+            <input type="text" id="usernameInput" class="username-input" placeholder="Enter your username..." maxlength="20">
+            <button onclick="setUsername()" class="username-btn">Set Username</button>
+        </div>
+        
+        <div class="stats-section">
+            <div class="stat-item">
+                <div class="stat-icon">👥</div>
+                <div class="stat-info">
+                    <h4>Active Users</h4>
+                    <span id="userCount">0</span>
+                </div>
+            </div>
+            
+            <div class="stat-item">
+                <div class="stat-icon">💬</div>
+                <div class="stat-info">
+                    <h4>Messages</h4>
+                    <span id="messageCount">0</span>
+                </div>
+            </div>
+            
+            <div class="stat-item">
+                <div class="stat-icon">⚡</div>
+                <div class="stat-info">
+                    <h4>Status</h4>
+                    <span id="connectionText">Offline</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Chat Area -->
+    <div class="main-chat">
+        <div class="chat-header">
+            <div class="chat-title">
+                <h1>💬 Live Chat</h1>
+            </div>
+            <div class="connection-indicator" id="connectionStatus">
+                <div class="status-dot"></div>
+                <span>Connecting...</span>
+            </div>
+        </div>
+        
+        <div class="messages-container" id="chatMessages">
+            <div class="message system">
+                <div class="message-bubble">
+                    <div class="message-content">🔗 Connecting to chat server...</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="typing-indicator" id="typingIndicator"></div>
+        
+        <div class="message-input-container">
+            <div class="message-input-wrapper">
+                <textarea 
+                    id="messageInput" 
+                    class="message-input" 
+                    placeholder="Type your message..." 
+                    maxlength="500" 
+                    rows="1"
+                    disabled
+                ></textarea>
+                <button onclick="sendMessage()" id="sendButton" class="send-button" disabled>
+                    ➤
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Socket.IO connection
+        const socket = io();
+        
+        // DOM elements
+        const chatMessages = document.getElementById('chatMessages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const usernameInput = document.getElementById('usernameInput');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const connectionText = document.getElementById('connectionText');
+        const userCount = document.getElementById('userCount');
+        const messageCount = document.getElementById('messageCount');
+        const typingIndicator = document.getElementById('typingIndicator');
+        
+        // State variables
+        let currentUsername = '';
+        let typingUsers = new Set();
+        let isTyping = false;
+        let typingTimeout = null;
+        let totalMessages = 0;
+        
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+        
+        // Connection event handlers
+        socket.on('connect', function() {
+            console.log('Connected to server');
+            connectionStatus.querySelector('span').textContent = 'Connected';
+            connectionStatus.className = 'connection-indicator connected';
+            connectionText.textContent = 'Online';
+            messageInput.disabled = false;
+            sendButton.disabled = false;
+            
+            // Clear connecting message with animation
+            setTimeout(() => {
+                chatMessages.innerHTML = '';
+                addMessage('System', '👋 Welcome to ChatFlow! Set your username to start chatting.', 'system');
+            }, 500);
+        });
+        
+        socket.on('disconnect', function() {
+            console.log('Disconnected from server');
+            connectionStatus.querySelector('span').textContent = 'Disconnected';
+            connectionStatus.className = 'connection-indicator disconnected';
+            connectionText.textContent = 'Offline';
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+            
+            addMessage('System', '🔌 Connection lost. Attempting to reconnect...', 'system');
+        });
+        
+        // Chat event handlers
+        socket.on('user_joined', function(data) {
+            addMessage(data.user_name, data.message, data.type, data.timestamp);
+        });
+        
+        socket.on('user_left', function(data) {
+            addMessage(data.user_name, data.message, data.type, data.timestamp);
+        });
+        
+        socket.on('user_renamed', function(data) {
+            addMessage(data.user_name, data.message, data.type, data.timestamp);
+        });
+        
+        socket.on('receive_message', function(data) {
+            addMessage(data.user_name, data.message, data.type, data.timestamp, data.user_id);
+            totalMessages++;
+            messageCount.textContent = totalMessages;
+        });
+        
+        socket.on('user_count', function(data) {
+            userCount.textContent = data.count;
+        });
+        
+        socket.on('user_typing', function(data) {
+            if (data.typing) {
+                typingUsers.add(data.user_name);
+            } else {
+                typingUsers.delete(data.user_name);
+            }
+            updateTypingIndicator();
+        });
+        
+        // Message handling functions
+        function addMessage(username, message, type = 'message', timestamp = null, userId = null) {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${type}`;
+            
+            // Determine if this is our own message
+            if (type === 'message' && username === currentUsername) {
+                messageElement.classList.add('sent');
+            } else if (type === 'message') {
+                messageElement.classList.add('received');
+            }
+            
+            const messageTime = timestamp || new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const messageBubble = document.createElement('div');
+            messageBubble.className = 'message-bubble';
+            
+            let messageContent = '';
+            
+            if (type === 'message') {
+                messageContent = `
+                    <div class="message-header">
+                        <span class="username">${escapeHtml(username)}</span>
+                        <span class="timestamp">${messageTime}</span>
+                    </div>
+                    <div class="message-content">${escapeHtml(message)}</div>
+                `;
+            } else {
+                messageContent = `<div class="message-content">${escapeHtml(message)}</div>`;
+            }
+            
+            messageBubble.innerHTML = messageContent;
+            messageElement.appendChild(messageBubble);
+            chatMessages.appendChild(messageElement);
+            
+            // Smooth scroll to bottom
+            setTimeout(() => {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }, 100);
+        }
+        
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && !messageInput.disabled) {
+                socket.emit('send_message', { message: message });
+                messageInput.value = '';
+                messageInput.style.height = 'auto';
+                
+                // Stop typing indicator
+                if (isTyping) {
+                    socket.emit('typing', { typing: false });
+                    isTyping = false;
+                }
+                
+                // Focus back on input
+                messageInput.focus();
+            }
+        }
+        
+        function setUsername() {
+            const username = usernameInput.value.trim();
+            if (username) {
+                currentUsername = username;
+                socket.emit('set_username', { username: username });
+                usernameInput.value = '';
+                usernameInput.placeholder = `Current: ${username}`;
+                
+                // Add visual feedback
+                usernameInput.style.borderColor = 'var(--text-accent)';
+                setTimeout(() => {
+                    usernameInput.style.borderColor = '';
+                }, 1000);
+            }
+        }
+        
+        function updateTypingIndicator() {
+            if (typingUsers.size > 0) {
+                const users = Array.from(typingUsers);
+                let text = '';
+                
+                if (users.length === 1) {
+                    text = `${users[0]} is typing`;
+                } else if (users.length === 2) {
+                    text = `${users[0]} and ${users[1]} are typing`;
+                } else {
+                    text = `${users.slice(0, -1).join(', ')} and ${users[users.length - 1]} are typing`;
+                }
+                
+                typingIndicator.innerHTML = `
+                    ${text}
+                    <span class="typing-dots">
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                    </span>
+                `;
+                typingIndicator.style.display = 'flex';
+            } else {
+                typingIndicator.style.display = 'none';
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Event listeners
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            } else {
+                // Handle typing indicator
+                if (!isTyping && currentUsername) {
+                    socket.emit('typing', { typing: true });
+                    isTyping = true;
+                }
+                
+                // Clear previous timeout
+                if (typingTimeout) {
+                    clearTimeout(typingTimeout);
+                }
+                
+                // Set new timeout to stop typing indicator
+                typingTimeout = setTimeout(() => {
+                    socket.emit('typing', { typing: false });
+                    isTyping = false;
+                }, 1000);
+            }
+        });
+        
+        usernameInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                setUsername();
+            }
+        });
+        
+        // Add click effects for message bubbles
+        chatMessages.addEventListener('click', function(e) {
+            const bubble = e.target.closest('.message-bubble');
+            if (bubble) {
+                bubble.style.transform = 'scale(0.98)';
+                setTimeout(() => {
+                    bubble.style.transform = '';
+                }, 150);
+            }
+        });
+        
+        // Focus management
+        window.addEventListener('load', function() {
+            usernameInput.focus();
+        });
+    </script>
+</body>
+</html>
