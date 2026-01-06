@@ -9,20 +9,6 @@ A modern, real-time web-based chat application built with **Flask-SocketIO** and
 
 > **Perfect for learning**: Computer Networks, WebSocket protocol, real-time communication, and full-stack web development!
 
-## 📸 Screenshots
-
-<div align="center">
-
-### Chat Interface
-![Chat Interface](docs/screenshots/chat-interface.png)
-*Modern, responsive chat interface with real-time messaging*
-
-### Multi-User Chat
-![Multi-User Chat](docs/screenshots/multi-user.png)
-*Multiple users chatting simultaneously with typing indicators*
-
-</div>
-
 ## 🎯 Live Demo
 
 ### 🌐 **[Try Live Demo →](https://web-socket-chat-application.vercel.app/)**
